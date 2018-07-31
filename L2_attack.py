@@ -1,162 +1,248 @@
 import sys
 import tensorflow as tf
 import numpy as np
+import itertools
 
 
 LEARNING_RATE = 1e-3
 MAX_ITERATIONS = 10000
 INITIAL_CONST = 1e-3
-BINARY_SEARCH_STEPS = 9
+BINARY_SEARCH_STEPS = 20
 ABORT_EARLY = True
-e1 = 1e-3
+epsilon = 1e-1
 e2 = 1e-3
+c1 = 0.5
 
-class Attack:
-    def __init__(self, sess, model, batch_size=1, initial_const=INITIAL_CONST, learning_rate=LEARNING_RATE, binary_search_steps=BINARY_SEARCH_STEPS, max_iterations=MAX_ITERATIONS, abort_early = ABORT_EARLY, box_min=-0.5, box_max=0.5):
+class AttackL2:
+    def __init__(self, sess, model, bus, initial_const, batch_size=1, learning_rate=LEARNING_RATE, binary_search_steps=BINARY_SEARCH_STEPS, max_iterations=MAX_ITERATIONS, abort_early=ABORT_EARLY):
+        """
 
-        input_size, output_size = model.input_size, model.output_size
+        :type batch_size: int
+        """
+        measurement_size, state_size = model.input_size, model.output_size
 
         self.sess = sess
         self.LEARNING_RATE = learning_rate
-        self.batch_size = batch_size
-        self.initial_const = INITIAL_CONST
         self.BINARY_SEARCH_STEPS = binary_search_steps
         self.MAX_ITERATIONS = max_iterations
         self.ABORT_EARLY = abort_early
+        self.initial_const = initial_const
+        self.batch_size = batch_size
 
         self.repeat = binary_search_steps >= 10
 
         # shape of batch input
-        shape = (batch_size, input_size)
+        shape = (batch_size, measurement_size)
         # variable to optimize over
         delta = tf.Variable(np.zeros(shape, dtype=np.float32))
 
-        # shape of input, output and const
-        self.tinput  = tf.Variable(np.zeros(shape), dtype=tf.float32)
-        self.toutput = tf.Variable(np.zeros(batch_size, output_size))
+        # shape of input, output and c
+        self.tmeasurement = tf.Variable(np.zeros(shape), dtype=tf.float32)
+        self.tstate = tf.Variable(np.zeros((batch_size, state_size)), dtype=tf.float32)
         self.const = tf.Variable(np.zeros(batch_size), dtype=tf.float32)
+
         # assign
-        self.assign_tinput = tf.placeholder(tf.float32, shape)
-        self.assign_toutput = tf.placeholder(tf.float32, (batch_size, output_size))
+        self.assign_tmeasurement = tf.placeholder(tf.float32, shape)
+        self.assign_tstate = tf.placeholder(tf.float32, (batch_size, state_size))
         self.assign_const = tf.placeholder(tf.float32, [batch_size])
 
-        # tanh transform
-        self.boxmul = (box_max - box_min) / 2.
-        self.boxplus = (box_min + box_max) / 2.
-        self.newinput = 0.5 * tf.tanh(delta + self.tinput) + 1
+        # new measurement
+        # z_tilde
+        boxmax = 0.5
+        boxmin = -0.5
+        # self.boxmul = (boxmax - boxmin) / 2.
+        self.boxmul = 0.5
+        # self.boxplus = (boxmin + boxmax) / 2.
+        self.boxplus = 0
 
-        # compute the output
-        self.output = model.predict(self.newinput)
+        self.new_measurement = tf.tanh(self.tmeasurement + delta) * self.boxmul
 
-        # L2 distance
-        # self.l2dist = tf.reduce_sum(tf.square(self.newinput-(self.boxmul * tf.tanh(self.tinput) + self.boxplus)))
+        # compute the estimated state
+        # x_hat
+        self.estimated_state = model.predict(self.tmeasurement)
+        # x_tilde_hat
+        self.new_estimated_state = model.predict(self.new_measurement)
+        # l1 and l2 distance of state diff
+        # (x_tilde_hat - x_hat)
+        self.l2dist = tf.reduce_sum(tf.square(self.new_estimated_state - self.estimated_state))
+        # (tf.tanh(self.estimated_state) * self.boxmul + self.boxplus)))
 
-        # new loss function
+
+        # measurement corresponding to new_estimated states
+        # z_tilde_hat
+        self.estimated_new_measurement = bus.estimated(self.new_estimated_state)
+        # loss function
         # loss1 distance of states
-        self.loss1 = tf.reduce_mean(-tf.square(self.output - model.predict(self.tinput)))
+        self.loss2 = tf.reduce_sum(self.l2dist)
+        self.loss2_ = tf.maximum(0.0, c1 - tf.reduce_sum(self.l2dist))
+        # loss2 distance of measurements
+        # self.estimated_measurement = bus.estimated(self.state)
+        # epsilon - (z_tilda_hat - z_tilda)
+        loss1 = tf.reduce_sum(tf.square(self.estimated_new_measurement - self.new_measurement)) - epsilon
+        loss1_ = tf.reduce_sum(tf.square(self.new_measurement - tf.tanh(self.estimated_new_measurement) * self.boxmul + self.boxplus))
+        # self.loss1 = tf.reduce_sum(self.const * loss1)
 
-
-        # loss1 distance of measurements
-        self.loss2 = tf.reduce_mean(-self.const * tf.squared_difference(self.newinput, self.boxmul * tf.tanh(self.tinput) + self.boxplus))
-        self.loss = self.loss1 + self.loss2
+        # with a given c
+        self.loss1 = tf.reduce_sum(self.initial_const * loss1)
+        self.loss1_ = tf.reduce_sum(self.initial_const * loss1_)
+        # loss = loss1 + loss2
+        # self.loss = self.loss1 - self.loss2
+        self.loss = self.loss1_ + self.loss2_
 
         # set up adam optimizer
         start_vars = set(x.name for x in tf.global_variables())
         optimizer = tf.train.AdamOptimizer(self.LEARNING_RATE)
-        self.train = optimizer.minimize(-self.loss, var_list=[delta])
+        self.train = optimizer.minimize(self.loss, var_list=[delta])
         end_vars = tf.global_variables()
         new_vars = [x for x in end_vars if x.name not in start_vars]
 
 
         # initialize variables
         self.setup = []
-        self.setup.append(self.tinput.assign(self.assign_tinput))
-        self.setup.append(self.toutput.assign(self.assign_toutput))
-        self.setup.append(self.const.assign(self.assign_const))
+        self.setup.append(self.tmeasurement.assign(self.assign_tmeasurement))
+        self.setup.append(self.tstate.assign(self.assign_tstate))
+        # self.setup.append(self.const.assign(self.assign_const))
 
-        self.init = tf.variables_initializer(var_list=[delta] + self.newinput)
+        self.init = tf.global_variables_initializer()
 
-    def attack_batch(self, inputs, outputs):
+
+    def attack(self, measurement, state):
         """
-        Run the attack on a batch of measurements and states.
-        :param inputs: a batch of inputs
-        :param outputs: corresponding outputs
+        Perform the L_2 attack on the given images for the given targets.
+
+        If self.targeted is true, then the targets represents the target labels.
+        If self.targeted is false, then targets are the original class labels.
+        """
+        r = []
+        print('go up to', len(measurement))
+        for i in range(0, len(measurement), self.batch_size):
+            r.extend(self.attack_batch(measurement[i:i+self.batch_size], state[i:i+self.batch_size]))
+        return np.array(r)
+
+
+    def attack_batch(self, measurement, state):
+        """
+        Perform attack on a batch of measurements
+        :param self:
+        :param measurement:
+        :param state:
         :return:
         """
 
-        # compare the 2 outputs
-        def success(input, input_adv, model):
-            l1 = tf.reduce_sum(tf.square(input, input_adv)) >= e1
-            l2 = tf.reduce_sum(tf.square(model.predict(input) - model.predict(input_adv))) >= e2
-
-            return tf.reduce_sum(tf.square(input, input_adv)) >= e1 and tf.reduce_sum(tf.square(model.predict(input) - model.predict(input_adv))) >= e2
-
         batch_size = self.batch_size
-        # convert to tanh
-        inputs = np.arctanh((inputs - self.boxplus) / self.boxmul * 0.999999)
-
+        measurement = np.arctanh(measurement / self.boxmul * 0.999999)
+        # find the best c
         lower_bound = np.zeros(batch_size)
         CONST = np.ones(batch_size) * self.initial_const
-        upper_bound = np.ones(batch_size) * 1e10
+        upper_bound = np.ones(batch_size)*1e10
 
-        o_bestl2 = [1e10]*batch_size
-        o_bestattack = [np.zeros(inputs[0].shape)]
+        o_bestl1 = [-1e10]*batch_size
+        o_bestl2 = [-1e10]*batch_size
+        o_bestattack = [np.zeros(measurement[0].shape)]*batch_size
 
-        for outer_step in range(self.BINARY_SEARCH_STEPS):
-            print(o_bestl2)
-            # reset adam's internal state
-            self.sess.run(self.init)
-            batch = inputs[:batch_size]
-            batch_output = outputs[: batch_size]
+        # without binary search
+        self.sess.run(self.init)
+        batch_measurement = measurement[:batch_size]
+        batch_state = state[:batch_size]
+        bestl1 = [-1e10] * batch_size
+        bestl2 = [-1e10] * batch_size
 
-            bestl2 = [1e10]*batch_size
-            bestscore = [-1]*batch_size
+        self.sess.run(self.setup, {self.assign_tmeasurement: batch_measurement,
+                                   self.assign_tstate: batch_state})
+        for iteration in range(self.MAX_ITERATIONS):
+            # perform attack
+            # l: total loss, l1s: state dist, l2s: c1- measurement dist
+            _, l, l1s, l2s, new_measurement = self.sess.run(
+                [self.train, self.loss, self.l2dist, self.loss2_, self.new_measurement])
 
+            # # print total loss, state dist, measurement dist
+            if iteration == 0:
+                print('num of iteration', "total loss", "mea_dist", "state_dist")
+            if iteration % (self.MAX_ITERATIONS // 10) == 0:
+                print('#', iteration, self.sess.run([self.loss, -self.loss1_, -self.loss2_ + c1]))
             #
-            if self.repeat is True and outer_step == self.BINARY_SEARCH_STEPS-1:
-                CONST = upper_bound
+            # # if self.ABORT_EARLY and iteration % (self.MAX_ITERATIONS // 10) == 0:
+            # #     if l > prev * .09999:
+            # #         break
+            # # prev = l
+            #
+            if l1s > bestl1[0] and l1s > c1:
+                bestl1[0] = l1s
 
-            # set the variables
-            self.sess.run(self.setup, {self.assign_tinput: batch,
-                                       self.assign_toutput: batch_output,
-                                       self.assign_const: CONST})
+            if l1s > o_bestl1[0] and l1s > c1:
+                o_bestl1[0] = l1s
+                o_bestattack = new_measurement
 
-            prev = 1e6
-            for iteration in range(self.MAX_ITERATIONS):
-                # perform attack
-                _, l, l1, l2, toutput, ninput = self.sess.run([self.train, self.loss, self.loss1, self.loss2, self.toutput, self.newinput])
 
-                if iteration % (self.MAX_ITERATIONS//10) == 0:
-                    print(iteration, self.sess.run(self.loss, self.loss1, self.loss2))
+        # for outer_step in range(self.BINARY_SEARCH_STEPS):
+        #     # print(o_bestl2)
+        #     # reset adam's internal state
+        #     self.sess.run(self.init)
+        #     batch_measurement = measurement[:batch_size]
+        #     batch_state = state[:batch_size]
+        #
+        #     # bestl1 = [-1e10]*batch_size
+        #     bestl2 = [-1e10]*batch_size
+        #
+        #     # The last iteration repeat the search once
+        #     if self.repeat is True and outer_step == self.BINARY_SEARCH_STEPS-1:
+        #         CONST = upper_bound
+        #
+        #     # set the variables that we don't have to send them over again
+        #     self.sess.run(self.setup, {self.assign_tmeasurement: batch_measurement,
+        #                                self.assign_tstate: batch_state,
+        #                                self.assign_const: CONST})
+        #
+        #     prev = 1e6
+        #     for iteration in range(self.MAX_ITERATIONS):
+        #         # perform attack
+        #         _, l, l1s, l2s, new_measurement = self.sess.run([self.train, self.loss, self.loss1, self.l2dist, self.new_measurement])
+        #
+        #         if iteration % (self.MAX_ITERATIONS//10) == 0:
+        #             print('#', iteration, self.sess.run([self.loss, self.loss1, self.loss2]))
+        #
+        #         if self.ABORT_EARLY and iteration % (self.MAX_ITERATIONS//10) == 0:
+        #             if l > prev*.09999:
+        #                 break
+        #         prev = l
+        #
+        #
+        #         for e, (l2, ii) in enumerate(zip(l2s, new_measurement)):
+        #             if l2 > bestl2[e]:
+        #                 bestl2[e] = l2
+        #
+        #             # if l1 > bestl1[e]:
+        #             #     bestl1[e] = l1
+        #
+        #             if l2 > o_bestl2[e]:
+        #                 o_bestl2[e] = l2
+        #                 o_bestattack[e] = ii
+        #         for e in range(self.batch_size):
+        #             if l2s > bestl2[e]:
+        #                 bestl2[e] = l2s
+        #
+        #             if l2s > o_bestl2[e]:
+        #                 o_bestl2[e] = l2s
+        #                 o_bestattack[e] = new_measurement[e]
 
-                if self.ABORT_EARLY and iteration%(self.MAX_ITERATIONS//10) == 0:
-                    if l > prev*.09999:
-                        break
-                    prev = l
 
-                for e, (l2, sc, ii) in enumerate(zip(self.loss1, toutput, ninput)):
-                    if l2 < bestl2[e] and success(toutput, ninput, model):
-                        bestl2[e] = l2
+            # # binary search for const
+            # for e in range(batch_size):
+            #     if bestl2[e] > e2:
+            #         # success, dive const by 2
+            #         upper_bound[e] = min(upper_bound[e], CONST[e])
+            #         if upper_bound[e] < 1e9:
+            #             CONST[e] = (lower_bound[e] + upper_bound[e]) / 2
+            #     else:
+            #         # failure, multiply by 10 or search with the known upper bound
+            #         lower_bound[e] = max(lower_bound, CONST[e])
+            #         if upper_bound[e] < 1e9:
+            #             CONST[e] = (lower_bound[e] + upper_bound[e]) / 2
+            #         else:
+            #             CONST[e] *= 10
 
-                    if l2 < o_bestl2[e]:
-                        o_bestl2[e] = l2
-                        o_bestattack[e] = ii
-
-            # binary search for const
-            for e in range(batch_size):
-                if bestl2[e] > e2 and bestscore != -1:
-                    # success, dive const by 2
-                    upper_bound[e] = min(upper_bound[e], CONST[e])
-                    if upper_bound[e] < 1e9:
-                        CONST[e] = (lower_bound[e] + upper_bound[e]) / 2
-                else:
-                    # failure, multiply by 10 or search with the known upper bound
-                    lower_bound[e] = max(lower_bound, CONST[e])
-                    if upper_bound[e] < 1e9:
-                        CONST[e] = (lower_bound[e] + upper_bound[e]) / 2
-                    else:
-                        CONST[e] *= 10
-
-        o_bestl2 = np.array(o_bestl2)
+        o_bestl1 = np.array(o_bestl1)
+        print(CONST)
+        # print(o_bestattack)
 
         return o_bestattack

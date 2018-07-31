@@ -1,5 +1,5 @@
 from model import StateEstimation
-# import tensorflow as tf
+import tensorflow as tf
 import numpy as np
 from keras.models import Sequential
 from keras.layers import Dense, Activation
@@ -9,9 +9,11 @@ from sklearn.model_selection import cross_val_score, KFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 import matplotlib.pyplot as plt
+from model import Model14
+from model import Model30
 
 
-def train(data, file_name, params, num_epoch=100, batch_size=256, init=None):
+def train30(data, file_name, params, num_epoch=100, batch_size=256, init=None):
     model = Sequential()
     # hidden layer
     model.add(Dense(params, input_dim=data.train_data.shape[1], activation='sigmoid'))
@@ -43,16 +45,21 @@ print(data.train_data.shape)
 print(data.train_label.shape)
 
 
-history
-history_14 = train(data, 'models/train_14', 80, num_epoch=200, batch_size=256)
-history_9 = train(data, 'models/train_9', 18, num_epoch=50, batch_size=128)
 
-plt.plot(history14.history['loss'])
-plt.plot(history.history['val_loss'])
+# history_14 = train14(data, 'models/train_14', 80, num_epoch=100, batch_size=256)
+history_30 = train30(data, 'models/train_30', 80, num_epoch=100, batch_size=256)
+# history_9 = train(data, 'models/train_9', 18, num_epoch=50, batch_size=128)
+with tf.Session() as sess:
+    model = Model30('models/train_30', sess)
+
+# plt.plot(history_14.history['loss'])
+# plt.plot(history_14.history['val_loss'])
+plt.plot(history_30.history['loss'])
+plt.plot(history_30.history['val_loss'])
 plt.xlabel('loss')
 plt.ylabel('epoch')
 plt.title('model loss')
-plt.legend(['train', 'test'], loc='upper right')
+plt.legend(['train', 'val'], loc='upper right')
 plt.show()
 # loss, mse = model.evaluate(StateEstimation().test_data, StateEstimation().test_label)
 # print("Results on test set: %.2f (%.2f) MSE" % (loss, mse))

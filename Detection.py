@@ -1,0 +1,1 @@
+def euclidean_detector():
