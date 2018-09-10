@@ -28,82 +28,80 @@ class AttackL2:
         self.ABORT_EARLY = abort_early
         self.initial_const = initial_const
         self.batch_size = batch_size
+        self.model = model
+        self.bus = bus
 
         self.repeat = binary_search_steps >= 10
 
-        # shape of batch input
-        shape = (batch_size, measurement_size)
-        # variable to optimize over
+            # shape of batch input
+        shape = (self.batch_size, self.model.input_size)
+            # variable to optimize over
         delta = tf.Variable(np.zeros(shape, dtype=np.float32))
 
         # shape of input, output and c
         self.tmeasurement = tf.Variable(np.zeros(shape), dtype=tf.float32)
-        self.tstate = tf.Variable(np.zeros((batch_size, state_size)), dtype=tf.float32)
-        self.const = tf.Variable(np.zeros(batch_size), dtype=tf.float32)
+        self.tstate = tf.Variable(np.zeros((self.batch_size, self.model.output_size)), dtype=tf.float32)
+        self.const = tf.Variable(np.zeros(self.batch_size), dtype=tf.float32)
 
-        # assign
+        # placeholder
         self.assign_tmeasurement = tf.placeholder(tf.float32, shape)
-        self.assign_tstate = tf.placeholder(tf.float32, (batch_size, state_size))
-        self.assign_const = tf.placeholder(tf.float32, [batch_size])
+        self.assign_tstate = tf.placeholder(tf.float32, (self.batch_size, self.model.output_size))
+        self.assign_const = tf.placeholder(tf.float32, [self.batch_size])
 
         # new measurement
         # z_tilde
-        boxmax = 0.5
-        boxmin = -0.5
-        # self.boxmul = (boxmax - boxmin) / 2.
-        self.boxmul = 0.5
-        # self.boxplus = (boxmin + boxmax) / 2.
-        self.boxplus = 0
 
-        self.new_measurement = tf.tanh(self.tmeasurement + delta) * self.boxmul
+        self.new_measurement = self.tmeasurement + delta
 
         # compute the estimated state
         # x_hat
-        self.estimated_state = model.predict(self.tmeasurement)
+        self.estimated_state = self.model.predict(tf.reshape(self.tmeasurement, (-1, self.model.input_size)))
         # x_tilde_hat
-        self.new_estimated_state = model.predict(self.new_measurement)
+        self.new_estimated_state = self.model.predict(tf.reshape(self.new_measurement, (-1, self.model.input_size)))
         # l1 and l2 distance of state diff
         # (x_tilde_hat - x_hat)
-        self.l2dist = tf.reduce_sum(tf.square(self.new_estimated_state - self.estimated_state))
+        self.l2dist = tf.reduce_sum(tf.square(self.new_estimated_state - self.estimated_state), 1)
         # (tf.tanh(self.estimated_state) * self.boxmul + self.boxplus)))
 
-
-        # measurement corresponding to new_estimated states
-        # z_tilde_hat
-        self.estimated_new_measurement = bus.estimated(self.new_estimated_state)
+        self.estimated_new_measurement = self.bus.estimated(self.new_estimated_state)
         # loss function
         # loss1 distance of states
-        self.loss2 = tf.reduce_sum(self.l2dist)
-        self.loss2_ = tf.maximum(0.0, c1 - tf.reduce_sum(self.l2dist))
+        self.loss1_ = tf.reduce_sum(self.l2dist)
         # loss2 distance of measurements
         # self.estimated_measurement = bus.estimated(self.state)
         # epsilon - (z_tilda_hat - z_tilda)
-        loss1 = tf.reduce_sum(tf.square(self.estimated_new_measurement - self.new_measurement)) - epsilon
-        loss1_ = tf.reduce_sum(tf.square(self.new_measurement - tf.tanh(self.estimated_new_measurement) * self.boxmul + self.boxplus))
+        loss2 = tf.reduce_sum(tf.square(self.estimated_new_measurement - self.new_measurement))
+        # loss2_ = tf.reduce_sum(tf.square(self.new_measurement - tf.tanh(self.estimated_new_measurement) * self.boxmul + self.boxplus))
         # self.loss1 = tf.reduce_sum(self.const * loss1)
 
         # with a given c
-        self.loss1 = tf.reduce_sum(self.initial_const * loss1)
-        self.loss1_ = tf.reduce_sum(self.initial_const * loss1_)
+        self.loss2_ = tf.reduce_sum(self.initial_const * loss2)
         # loss = loss1 + loss2
         # self.loss = self.loss1 - self.loss2
-        self.loss = self.loss1_ + self.loss2_
+        self.loss = 1. / self.loss1_ + self.loss2_
 
-        # set up adam optimizer
+
         start_vars = set(x.name for x in tf.global_variables())
         optimizer = tf.train.AdamOptimizer(self.LEARNING_RATE)
         self.train = optimizer.minimize(self.loss, var_list=[delta])
         end_vars = tf.global_variables()
         new_vars = [x for x in end_vars if x.name not in start_vars]
 
-
         # initialize variables
         self.setup = []
         self.setup.append(self.tmeasurement.assign(self.assign_tmeasurement))
         self.setup.append(self.tstate.assign(self.assign_tstate))
-        # self.setup.append(self.const.assign(self.assign_const))
+        self.setup.append(self.const.assign(self.assign_const))
 
-        self.init = tf.global_variables_initializer()
+        self.init = tf.variables_initializer(var_list=[delta]+new_vars)
+
+
+
+# measurement corresponding to new_estimated states
+        # z_tilde_hat
+        # convert to np and calculated measurement
+
+        # set up adam optimizer
 
 
     def attack(self, measurement, state):
@@ -116,6 +114,7 @@ class AttackL2:
         r = []
         print('go up to', len(measurement))
         for i in range(0, len(measurement), self.batch_size):
+            print("tick", i)
             r.extend(self.attack_batch(measurement[i:i+self.batch_size], state[i:i+self.batch_size]))
         return np.array(r)
 
@@ -130,7 +129,6 @@ class AttackL2:
         """
 
         batch_size = self.batch_size
-        measurement = np.arctanh(measurement / self.boxmul * 0.999999)
         # find the best c
         lower_bound = np.zeros(batch_size)
         CONST = np.ones(batch_size) * self.initial_const
@@ -140,38 +138,41 @@ class AttackL2:
         o_bestl2 = [-1e10]*batch_size
         o_bestattack = [np.zeros(measurement[0].shape)]*batch_size
 
+
         # without binary search
         self.sess.run(self.init)
+
         batch_measurement = measurement[:batch_size]
         batch_state = state[:batch_size]
         bestl1 = [-1e10] * batch_size
         bestl2 = [-1e10] * batch_size
 
+
+
         self.sess.run(self.setup, {self.assign_tmeasurement: batch_measurement,
-                                   self.assign_tstate: batch_state})
+                                   self.assign_tstate: batch_state,
+                                   self.assign_const: CONST})
         for iteration in range(self.MAX_ITERATIONS):
             # perform attack
-            # l: total loss, l1s: state dist, l2s: c1- measurement dist
+            # l: total loss, l1s: state dist, l2s: measurement dist
             _, l, l1s, l2s, new_measurement = self.sess.run(
-                [self.train, self.loss, self.l2dist, self.loss2_, self.new_measurement])
+                [self.train, self.loss, self.loss1_, self.loss2_, self.new_measurement])
 
             # # print total loss, state dist, measurement dist
             if iteration == 0:
                 print('num of iteration', "total loss", "mea_dist", "state_dist")
             if iteration % (self.MAX_ITERATIONS // 10) == 0:
-                print('#', iteration, self.sess.run([self.loss, -self.loss1_, -self.loss2_ + c1]))
+                print('#', iteration, self.sess.run([self.loss, self.loss1_, self.loss2_]))
             #
             # # if self.ABORT_EARLY and iteration % (self.MAX_ITERATIONS // 10) == 0:
             # #     if l > prev * .09999:
             # #         break
             # # prev = l
             #
-            if l1s > bestl1[0] and l1s > c1:
-                bestl1[0] = l1s
-
-            if l1s > o_bestl1[0] and l1s > c1:
-                o_bestl1[0] = l1s
-                o_bestattack = new_measurement
+            for e, (l1s, l2s, new_measurement) in enumerate(zip(l1s, l2s, new_measurement)):
+                if l1s > bestl1[e]:
+                    bestl1[e] = l1s
+                    o_bestattack[e] = new_measurement
 
 
         # for outer_step in range(self.BINARY_SEARCH_STEPS):

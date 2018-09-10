@@ -1,8 +1,8 @@
 import tensorflow as tf
 import numpy as np
 import time
-from config import Bus14, Bus30
-from model import StateEstimation, Model14, Model30
+from config import Bus14, Bus30, Bus9
+from model import StateEstimation, Model14, Model30, Model9
 from L2_attack import AttackL2
 import matplotlib.pyplot as plt
 from math import *
@@ -30,11 +30,11 @@ def generate_data(data, num_samples=1, start=0):
     return measurement, state
 
 
-def eval(measurement, new_measurement, c):
-    estimated_state = model.model.predict(np.reshape(measurement, (-1, 48)))
-    estimated_new_state = model.model.predict(np.reshape(new_measurement, (-1, 48)))
+def eval(new_measurement, new_estimated_measurement, c):
+    estimated_state = model.model.predict(np.reshape(measurement, (-1, 30)))
+    estimated_new_state = model.model.predict(np.reshape(new_measurement, (-1, 30)))
     state_dist = np.sum((estimated_new_state - estimated_state)**2)**.5
-    measurement_dist = np.sum((measurement - new_measurement)**2)**.5
+    measurement_dist = np.sum((new_estimated_measurement - new_measurement)**2)**.5
     f0 = state_dist
     f1 = state_dist + c * measurement_dist
 
@@ -45,10 +45,10 @@ if __name__ == "__main__":
     with tf.Session() as sess:
         data = StateEstimation()
         # print(data.train_data.shape)
-        model = Model30("models/train_30", sess)
-        bus_30 = Bus30()
+        model = Model9("models/train_9", sess)
+        bus = Bus9()
 
-        measurement, state = generate_data(data, num_samples=1)
+        measurement, state = generate_data(data, num_samples=5)
         # print(measurement.shape)
 
         c_record = []
@@ -56,9 +56,9 @@ if __name__ == "__main__":
         f1_record = []
 
 
-        for c in range(-2, 2):
+        for c in range(-7, 7):
             time_start = time.time()
-            attack = AttackL2(sess, model, bus_30, batch_size=1, initial_const=10**c, max_iterations=1000)
+            attack = AttackL2(sess, model, bus, batch_size=1, initial_const=10**c, max_iterations=1000)
             new_measurement = attack.attack(measurement, state)
             # print(new_measurement)
             time_end = time.time()
@@ -68,14 +68,20 @@ if __name__ == "__main__":
             print(measurement)
             print("Adversarial")
             print(new_measurement[0])
-            estimated_state = model.model.predict(np.reshape(measurement, (-1, 112)))
-            estimated_new_state = model.model.predict(np.reshape(new_measurement[0], (-1, 112)))
+            estimated_state = model.model.predict(np.reshape(measurement, (-1, 36)))
+            estimated_new_state = model.model.predict(np.reshape(new_measurement[0], (-1, 36)))
+            new_estimated_measurement = bus.estimated(estimated_new_state)
             # arb_estimated_new_state = model.model.predict(np.reshape(measurement[i], (-1, 48)))
             print("State Estimation of the valid", estimated_state)
             print("State Estimation of the adversarial", estimated_new_state)
-            print("Total distortion(measurement):", np.sum((new_measurement - measurement)**2)**.5)
+            print("State diff(state)", (np.sum(estimated_new_state - estimated_state)**2))**.5
+            print("new estimated", new_estimated_measurement)
 
-            print("State diff(state)", np.sum((estimated_new_state - estimated_state)**2)**.5)
+            # new_estimated_measurement = new_estimated_measurement_tensor.eval(session=tf.Session())
+            # new_estimated_measurement = np.reshape(new_estimated_measurement, (-1, 112))
+
+            # print("Total distortion(measurement):", (np.sum(new_measurement - new_estimated_measurement)**2)**.5)
+
 
         # print("random add distortion")
         # # print("original", measurement)

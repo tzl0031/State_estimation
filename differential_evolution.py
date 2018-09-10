@@ -24,6 +24,7 @@ _MACHEPS = np.finfo(np.float64).eps
 
 
 def differential_evolution(func, bounds, args=(), strategy='best1bin',
+                           constraint=None,
                            maxiter=1000, popsize=15, tol=0.01,
                            mutation=(0.5, 1), recombination=0.7, seed=None,
                            callback=None, disp=False, polish=True,
@@ -339,7 +340,7 @@ class DifferentialEvolutionSolver(object):
                         "(M, N) where N is the number of parameters and M>5")
 
     def __init__(self, func, bounds, args=(),
-                 strategy='best1bin', maxiter=1000, popsize=15,
+                 strategy='best1bin', constriant=None, maxiter=1000, popsize=15,
                  tol=0.01, mutation=(0.5, 1), recombination=0.7, seed=None,
                  maxfun=np.inf, callback=None, disp=False, polish=True,
                  init='latinhypercube', atol=0):
@@ -357,6 +358,7 @@ class DifferentialEvolutionSolver(object):
 
         # relative and absolute tolerances for convergence
         self.tol, self.atol = tol, atol
+        self.cons = constriant
 
         # Mutation constant should be in [0, 2). If specified as a sequence
         # then dithering is performed.
@@ -608,7 +610,7 @@ class DifferentialEvolutionSolver(object):
             result = minimize(self.func,
                               np.copy(DE_result.x),
                               method='L-BFGS-B',
-                              bounds=self.limits.T,
+                              bounds=self.limits.T, constraints=self.cons,
                               args=self.args)
 
             self._nfev += result.nfev

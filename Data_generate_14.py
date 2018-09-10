@@ -13,7 +13,7 @@ mpc = case14()
 network = pypsa.Network()
 network.import_from_pypower_ppc(mpc)
 
-M = np.zeros([num_train, 2*num_branches +1 * num_buses])
+M = np.zeros([num_train, 2*num_branches + 1 * num_buses])
 E = np.zeros([num_train, 2*num_buses])
 
 
