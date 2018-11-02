@@ -1,104 +1,202 @@
-from pypower.api import case9
+from pypower.api import case9, case14
 import pypsa
 import pandas as pd
 import numpy as np
 from math import *
+import tensorflow as tf
 from scipy import sparse
+import keras.backend as K
 
-network = pypsa.Network()
-ppc = case9()
-network.import_from_pypower_ppc(ppc)
-bus_num = np.array(network.lines[['bus0', 'bus1']].values)
+num_bus = 30
 
-V = np.array([1.0000, 1.0000, 1.0000, 0.9870, 0.9755, 1.0034, 0.9856, 0.9962, 0.9576]) * 10
-A = np.array([0, 9.6687, 4.7711, -2.4066, -4.0173, 1.9256, 0.6215, 3.7991, -4.3499])
-p_bus = np.array([71.9547, 163.0000, 85.0000, 0, -90, 0, -100, 0, -125])
-q_bus = np.array([24.07, 14.46, -3.65, 0, -30, 0, -35, 0, -50])
-p_line_i = np.array([71.9547, 30.7283, -59.4453, 85.0000, 24.1061, -75.9894, -163.0000, 86.5044, -40.9601])
-p_line_j = np.array([-71.9547, -30.5547, 60.8939, -85.0000, -24.0106, 76.4956,163.0000, -84.0399, 41.2264])
-q_line_i = np.array([24.0690, -0.5859, -16.3120, -3.6490, 4.5368, -10.5992, 2.2762, -2.5324, -35.7180])
-q_line_j = np.array([-20.7530, -13.6880, -12.4275, 7.8907, -24.4008, 0.2562, 14.4601, -14.2820, 21.3389])
+# 9
+# v = np.array([1, 1, 1, 0.9872, 0.9772, 1.0037, 0.9859, 0.9963, 0.9576]) * 10
+# a = np.array([0, 10.212, 5.4522, -2.0686, -3.199, 2.6077, 1.2241, 4.3428, -3.9416])
+# p_bus = np.array([61.8641, 163, 85, 0, -80, 0, -100, 0, -125])
+# q_bus = np.array([23.3778, 14.3328, -4.2564, 0, -30, 0, -35, 0, -50])
 
+# 14
+# v = np.array([1.060, 1.045, 1.010, 1.0177, 1.0195, 1.0700, 1.0615, 1.090, 1.0559, 1.051, 1.0569, 1.0552, 1.0504, 1.0355]) * 10
+# a = np.array(
+#     [0, -4.9826, -12.7251, -10.3129, -8.7739, -14.2209, -13.3596, -13.3596, -14.9385, -15.0973, -14.7906, -15.0756, -15.1563,
+#      -16.0336])
+# p_bus = np.array(
+#     [232.3933, 40 - 21.7000, -94.2000, -47.8000, -7.6000, -11.2000, 0, 0, -29.5000, -9.0000, -3.5000, -6.1000, -13.5000,
+#      -14.9000])
+# q_bus = np.array(
+#     [-16.5493, 43.5571 - 12.7000, 25.0753 - 19.0000, +3.9000, -1.6000, 12.7309 - 7.5000, 0, 17.6235, -16.6000, -5.8000, -1.8000,
+#      -1.6000, -5.8000, -5.0000])
 
-print(V.shape, A.shape, p_bus.shape, q_bus.shape, p_line_i.shape, p_line_j.shape, q_line_i.shape, q_line_j.shape)
+30
+v = np.array(
+    [1, 1, 0.9831, 0.9801, 0.9824, 0.9732, 0.9674, 0.9606, 0.9805, 0.9844, 0.9805, 0.9855, 1, 0.9767, 0.9802, 0.9774,
+     0.9769, 0.9684, 0.9653, 0.9692, 0.9934, 1, 1, 0.9886, 0.9902, 0.9722, 1, 0.9747, 0.9796, 0.9679]) * 10
 
+a = np.array(
+    [0, -0.4155, -1.5221, -1.7947, -1.8638, -2.267, -2.6518, -2.7258, -2.9969, -3.3749, -2.9969, -1.5369, 1.4762,
+     -2.308, -2.3118, -2.6445, -3.3923, -3.4784, -3.9582, -3.871, -3.4884, -3.3927, -1.5892, -2.6315, -1.69, -2.1393,
+     -0.8284, -2.2659, -2.1285, -3.0415])
 
-G = pd.read_csv('bus_config/Ybus_9_real', header=None)
-B = pd.read_csv('bus_config/Ybus_9_imag', header=None)
-g = pd.read_csv('bus_config/Ybranch_9_real', header=None)
-b = pd.read_csv('bus_config/Ybranch_9_imag', header=None)
-G = G.values
-B = B.values
-g = g.values
-b = b.values
-num_bus = 9
-num_lines = 9
+p_bus = np.array(
+    [25.9738, 39.27, -2.4, -7.6, 0, 0, -22.8, -30, 0, -5.8, 0, -11.2, 37, -6.2, -8.2, -3.5, -9, -3.2, -9.5, -2.2, -17.5,
+     21.59, 16, -8.7, 0, -3.5, 26.91, 0, -2.4, -10.6])
 
-# print(bus_num)
-# print("voltage", V)
-# print("angle in rad", A)
-# print('real P bus', p_bus)
-# print("P line i", p_line_i)
-# print("P line j", p_line_j)
-# print("real Q bus", q_bus)
-# print("real Q line i", q_line_i)
-# print("real Q line j", q_line_j)
+q_bus = np.array(
+    [-0.9985, 19.299, -1.2, -1.6, 0, 0, -10.9, -30, 0, -2, 0, -7.5, 11.3529, -1.6, -2.5, -1.8, -5.8, -0.9, -3.4, -0.7,
+     -11.2, 39.57, 6.351, -6.7, 0, -2.3, 10.5405, 0, -0.9, -1.9])
 
-P_bus = np.zeros(num_bus)
-Q_bus = np.zeros(num_bus)
-V = np.reshape(V, (num_bus, -1))
-P_line = np.zeros([num_bus, num_bus])
-Q_line = np.zeros([num_bus, num_bus])
-A_ = np.zeros((num_bus, num_bus))
+V = np.reshape(v, (-1, num_bus))
+A = np.reshape(a, (-1, num_bus))
 
-for i in range(num_bus):
-    for j in range(num_bus):
-        cos_ = cos((A[i] - A[j]) * pi / 180)
-        sin_ = sin((A[i] - A[j]) * pi / 180)
-        P_bus[i] += V[i] * V[j] * (G[i, j] * cos_ + B[i, j] * sin_)
-        Q_bus[i] += V[i] * V[j] * (G[i, j] * sin_ - B[i, j] * cos_)
+print(V.shape, A.shape, p_bus.shape, q_bus.shape)
 
-        P_line[i, j] = V[i] * V[j] * (G[i, j] * cos_ + B[i, j] * sin_) - V[i] ** 2 * G[i, j]
-        Q_line[i, j] = V[i] * V[j] * (G[i, j] * sin_ - B[i, j] * cos_) + V[i] ** 2 * B[i, j]
+G = pd.read_csv('bus_config/Ybus_' + str(num_bus) + '_real', header=None)._values
+# B = pd.read_csv('bus_config/Ybus_14_imag_without_shunt', header=None).values
+B = pd.read_csv('bus_config/Ybus_' + str(num_bus) + '_imag', header=None).values
 
-# print('P bus diff',  P_bus - p_bus)
-# print('P bus', P_bus)
-# print('P line', P_line)
-# print('P line', sparse.csr_matrix(P_line))
-# print('Q line', sparse.csr_matrix(Q_line))
+print('real P bus', p_bus)
+print("real Q bus", q_bus)
+
+batch_size = 1
+
+# estimate_np
+print(A.shape)
+A = A.reshape(batch_size, num_bus, 1)
+# print(A)
+# print(np.tile(A, (1, 1, num_bus)))
+# print(np.transpose(np.tile(A, (1, 1, num_bus)), (0, 2, 1)))
 #
-# print("Q bus diff", (Q_bus - q_bus))
-
-P0 = np.zeros(num_lines)
-P1 = np.zeros(num_lines)
-for i in range(num_lines):
-    x = int(bus_num[i, 0]) - 1
-    y = int(bus_num[i, 1]) - 1
-    # print(x, y）
-    P0[i] = P_line[x, y]
-    P1[i] = P_line[y, x]
+# A_ = np.transpose(np.tile(A, (1, 1, num_bus)), (0, 2, 1)) - np.tile(A, (1, 1, num_bus))
+# cos_ = np.cos(A_ * pi / 180)
+# sin_ = np.sin(A_ * pi / 180)
+#
+# term_1_P = G * cos_ + B * sin_
+# term_1_Q = G * sin_ - B * cos_
+# P_bus = (V * np.tensordot(V, term_1_P, axes=([1], [1, 2])))
+# Q_bus = (V * np.tensordot(V, term_1_Q, axes=([1],[1, 2])))
 
 
+P_bus = np.zeros((batch_size, num_bus))
+Q_bus = np.zeros((batch_size, num_bus))
 
-print(P0, P1)
+for k in range(batch_size):
+    for i in range(num_bus):
+        for j in range(num_bus):
+            cos_ = cos((A[k, i] - A[k, j]) * pi / 180)
+            sin_ = sin((A[k, i] - A[k, j]) * pi / 180)
+            P_bus[k, i] += V[k, i] * V[k, j] * (G[i, j] * cos_ + B[i, j] * sin_)
+            Q_bus[k, i] += V[k, i] * V[k, j] * (G[i, j] * sin_ - B[i, j] * cos_)
+#
+# for i in range(batch_size):
+#     P_bus[i] = np.dot(V[i], term_1_P[i])
+#     Q_bus[i] = np.dot(V[i], term_1_Q[i])
+#
+# P_bus = (V * P_bus)[0]
+# Q_bus = (V * Q_bus)[0]
+print(P_bus, Q_bus)
+print("estimate from np\n")
+print('P bus diff', P_bus - p_bus)
+print('Q bus diff', Q_bus - q_bus)
 
-Q0 = np.zeros(num_lines)
-Q1 = np.zeros(num_lines)
-for i in range(num_lines):
-    x = int(bus_num[i, 0]) - 1
-    y = int(bus_num[i, 1]) - 1
-    # print(x, y）
-    Q0[i] = Q_line[x, y]
-    Q1[i] = Q_line[y, x]
-    # print(P0, P1)
+# P_bus = tf.Variable(tf.zeros([batch_size, num_bus]), dtype=tf.float32)
+# Q_bus = tf.Variable(tf.zeros([batch_size, num_bus]), dtype=tf.float32)
+# P_line = np.zeros([num_bus, num_bus])
+# Q_line = np.zeros([num_bus, num_bus])
+# A_ = tf.Variable(tf.zeros((batch_size, num_bus, num_bus)), dtype=tf.float32)
+
+V = np.reshape(v, (-1, num_bus))
+A = np.reshape(a, (-1, num_bus))
+
+V = K.variable(V)
+A = K.variable(A)
+
+G = K.constant(G)
+B = K.constant(B)
+
+A_ = K.permute_dimensions(K.repeat(A, num_bus), [0, 2, 1]) - K.repeat(A, num_bus)
+cos_ = K.cos(A_ * pi / 180)
+sin_ = K.sin(A_ * pi / 180)
+#
+# # print(K.eval(cos_))
+#
+term_1_P = G * cos_ + B * sin_
+term_1_Q = G * sin_ - B * cos_
+P_bus = V * K.batch_dot(V, term_1_P, axes=[1, 2])
+Q_bus = V * K.batch_dot(V, term_1_Q, axes=[1, 2])
+#
+# V_ = K.permute_dimensions(K.repeat(A, 14), [0, 2, 1]) * K.repeat(A, 14)
+# # print(K.eval(K.repeat(A, 14)))
+# # print(K.eval(K.permute_dimensions(K.repeat(A, 14), [0, 2, 1])))
+# P_line = V_ * term_1_P
+#
+print(K.eval(P_bus))
+print(K.eval(Q_bus))
+# # print(K.eval(P_line))
+
+print('P bus diff', abs(K.eval(P_bus) - p_bus) < 0.01)
+print('P bus diff', abs(K.eval(P_bus) - p_bus))
+print('Q bus diff', abs(K.eval(Q_bus) - q_bus) < 0.01)
+print('Q bus diff', abs(K.eval(Q_bus) - q_bus))
+
+# P0 = np.zeros(num_lines)
+# P1 = np.zeros(num_lines)
+# for i in range(num_lines):
+#     x = int(bus_num[i, 0]) - 1
+#     y = int(bus_num[i, 1]) - 1
+#     # print(x, y）
+#     P0[i] = P_line[x, y]
+#     P1[i] = P_line[y, x]
+
+# batch_estimated_measurement = K.concatenate([P_bus, Q_bus], axis=1)
+
+#
+# with tf.Session() as sess:
+#     sess.run(tf.global_variables_initializer())
+#
+#     for i in range(num_bus):
+#         for j in range(num_bus):
+#             tf.assign(A_[:, i, j], tf.subtract(A[:, j], A[:, i]))
+#             # tf.assign(A_[:, i, j], 1)
+#
+#     cos_ = tf.cos(A_ * pi / 180)
+#     sin_ = tf.sin(A_ * pi / 180)
+#
+#     term_1 = tf.multiply(G, cos_) + tf.multiply(B, sin_)
+#     for k in range(batch_size):
+#         term_2 = tf.matmul(V, term_1[k, :, :])
+#         b = tf.multiply(V, term_2)
+#         c = P_bus[k]
+#         update = tf.assign(P_bus[k, :], tf.multiply(V, term_2))
+#
+#     # sess.run([P_bus])
+#
+
+#     sess.run(update, feed_dict={V:v, A:a})
+#     print('P bus', P_bus.eval())
+# # print('P line', P_line)
+# # print('P line', sparse.csr_matrix(P_line))
+# # print('Q line', sparse.csr_matrix(Q_line))
+# #
+# # print("Q bus diff", (Q_bus - q_bus))
+
+
+# print(P0, P1)
+
+# Q0 = np.zeros(num_lines)
+# Q1 = np.zeros(num_lines)
+# for i in range(num_lines):
+#     x = int(bus_num[i, 0]) - 1
+#     y = int(bus_num[i, 1]) - 1
+#     # print(x, y）
+#     Q0[i] = Q_line[x, y]
+#     Q1[i] = Q_line[y, x]
+#     # print(P0, P1)
 
 # estimated_measurement = np.concat([P_bus, P0, P1], 1)
-print(Q0)
-print(Q1)
+# print(Q0)
+# print(Q1)
 
-print("P line i diff", abs(p_line_i - P0) <=0.01)
-print("P line j diff", abs(p_line_j - P1) <=0.01)
-print("Q line i diff", abs(q_line_i - Q0) )
-print("Q line j diff", q_line_j - Q1)
-
-
+# print("P line i diff", abs(p_line_i - P0) <=0.01)
+# print("P line j diff", abs(p_line_j - P1) <=0.01)
+# print("Q line i diff", abs(q_line_i - Q0) )
+# print("Q line j diff", q_line_j - Q1)

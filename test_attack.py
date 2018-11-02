@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 import time
-from config import Bus14, Bus30, Bus9
+from config1 import Bus9
 from model import StateEstimation, Model14, Model30, Model9
 from L2_attack import AttackL2
 import matplotlib.pyplot as plt
@@ -30,16 +30,6 @@ def generate_data(data, num_samples=1, start=0):
     return measurement, state
 
 
-def eval(new_measurement, new_estimated_measurement, c):
-    estimated_state = model.model.predict(np.reshape(measurement, (-1, 30)))
-    estimated_new_state = model.model.predict(np.reshape(new_measurement, (-1, 30)))
-    state_dist = np.sum((estimated_new_state - estimated_state)**2)**.5
-    measurement_dist = np.sum((new_estimated_measurement - new_measurement)**2)**.5
-    f0 = state_dist
-    f1 = state_dist + c * measurement_dist
-
-    return f0, f1
-
 
 if __name__ == "__main__":
     with tf.Session() as sess:
@@ -48,7 +38,7 @@ if __name__ == "__main__":
         model = Model9("models/train_9", sess)
         bus = Bus9()
 
-        measurement, state = generate_data(data, num_samples=5)
+        measurement, state = generate_data(data, num_samples=1)
         # print(measurement.shape)
 
         c_record = []
@@ -68,13 +58,15 @@ if __name__ == "__main__":
             print(measurement)
             print("Adversarial")
             print(new_measurement[0])
-            estimated_state = model.model.predict(np.reshape(measurement, (-1, 36)))
-            estimated_new_state = model.model.predict(np.reshape(new_measurement[0], (-1, 36)))
-            new_estimated_measurement = bus.estimated(estimated_new_state)
+            estimated_state = model.model.predict(np.reshape(measurement, (-1, 6)))
+            estimated_new_state = model.model.predict(np.reshape(new_measurement[0], (-1, 6)))
+            new_estimated_measurement = bus.estimated_np(estimated_new_state)
             # arb_estimated_new_state = model.model.predict(np.reshape(measurement[i], (-1, 48)))
             print("State Estimation of the valid", estimated_state)
             print("State Estimation of the adversarial", estimated_new_state)
-            print("State diff(state)", (np.sum(estimated_new_state - estimated_state)**2))**.5
+
+            print("State diff(state)", np.sqrt(np.sum(np.square(estimated_new_state - estimated_state), axis=1)))
+            print("Measurement diff(state)", np.sqrt(np.sum(np.square(new_estimated_measurement - new_measurement[0]))))
             print("new estimated", new_estimated_measurement)
 
             # new_estimated_measurement = new_estimated_measurement_tensor.eval(session=tf.Session())
@@ -120,15 +112,3 @@ if __name__ == "__main__":
         #
         #
         #
-        #     # estimated_state = model.model.predict(np.reshape(measurement[i], (-1, 48)))
-        #     # estimated_new_state = model.model.predict(np.reshape(new_measurement[i], (-1, 48)))
-        #     # # arb_estimated_new_state = model.model.predict(np.reshape(measurement[i], (-1, 48)))
-        #     # print("Total distortion(Euclidean Distance):", np.sum((measurement[i] - measurement)**2)**.5)
-        #     #
-        #     #
-        #     #
-        #     #
-        #     # print("State Estimation of the valid", estimated_state)
-        #     # print("State Estimation of the adversarial", arb_estimated_new_state)
-        #     # print("State diff(euclidean distance)", np.sum((arb_estimated_new_state - estimated_state)**2)**.5)
-        #     #

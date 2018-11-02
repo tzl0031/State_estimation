@@ -5,6 +5,7 @@ from math import *
 import pandas as pd
 import tensorflow as tf
 from math import *
+import keras.backend as K
 
 
 class Bus9:
@@ -56,6 +57,8 @@ class Bus9:
         # estimated_measurement = np.zeros(36)
         G = self.G
         B = self.B
+
+
         for k in range(batch_size):
             for i in range(self.num_bus):
                 for j in range(self.num_lines):
@@ -96,42 +99,48 @@ class Bus9:
 
         # batch_size = state.shape[0]
 
-        generator_mag = tf.Variable(tf.ones((batch_size, 9)))
-        ang_ref = tf.Variable(tf.zeros((batch_size, 1)))
+        generator_mag = K.constant(tf.ones((batch_size, 9)))
+        ang_ref = K.constant(tf.zeros((batch_size, 1)))
         # ref_ang = tf.Variable(tf.zeros((batch_size, 1)))
-        state = tf.Variable(tf.concat([generator_mag, ang_ref, state], axis=1))
+        state = K.variable(tf.concat([generator_mag, ang_ref, state], axis=1))
 
         # print(state.shape)
         V = state[:, :9]
         A = state[:, 9:]
         # print(V.shape, A.shape)
-        P_bus = tf.Variable(tf.zeros((A.shape[0], 9)))
-        Q_bus = tf.Variable(tf.zeros((A.shape[0], 9)))
+        P_bus = K.variable(tf.zeros((A.shape[0], 9)))
+        Q_bus = K.variable(tf.zeros((A.shape[0], 9)))
 
-        P_line = tf.Variable(tf.zeros((A.shape[0], 9, 9)))
+        P_line = K.variable(tf.zeros((A.shape[0], 9, 9)))
         # Q_bus = np.zeros(14)
         # P_line = np.zeros([14, 14])
         # Q_line = np.zeros([14, 14])
+
         G = self.G
         B = self.B
-        batch_estimated_measurement = tf.Variable(tf.zeros((A.shape[0], 18)))
+        G = K.constant(G, dtype=tf.float32)
+        B = K.constant(B, dtype=tf.float32)
 
-        A
+        batch_estimated_measurement = K.variable(tf.zeros((A.shape[0], 18)))
+
+        A_ = K.variable(tf.zeros((batch_size, self.num_bus, self.num_bus)))
         # print(G.shape, B.shape)
-        for k in range(A.shape[0]):
-            print("#:", k)
-            for i in range(self.num_bus):
-                for j in range(self.num_bus):
-                    # print(G[i, j])
-                    # print(B[i, j])
-                    cos = tf.cos((A[k, i] - A[k, j]) * pi / 180)
-                    sin = tf.sin((A[k, i] - A[k, j]) * pi / 180)
-                    tf.assign(P_bus[k, i], tf.add(P_bus[k, i], tf.multiply(V[k, i], V[k, j]) * tf.add(G[i, j] * cos \
-                                                                                                      , B[i, j] * sin)))
-                    tf.assign(Q_bus[k, i], tf.add(Q_bus[k, i], tf.multiply(V[k, i], V[k, j]) * tf.subtract(G[i, j] * sin \
-                                                                                                           , B[
-                                                                                                               i, j] * cos)))
+        for i in range(self.num_bus):
+            for j in range(self.num_bus):
+                A_[:, i, j] = A[:, j] - A[:, i]
+                # tf.assign(A_[:, i, j], 1)
 
+        cos_ = K.cos(A_ * pi / 180)
+        sin_ = K.sin(A_ * pi / 180)
+
+        term_1_P = K.(G, cos_) + tf.multiply(B, sin_)
+        term_1_Q = tf.multiply(G, sin_) + tf.multiply(B, cos_)
+        term_2_P = K.batch_dot(V, term_1_P)
+        term_2_Q = K.batch_dot(V, term_1_Q)
+        # b = tf.multiply(V, term_2)
+        # c = P_bus[k]
+        P_bus[k], tf.multiply(V, term_2_P))
+        Q_bus[k], tf.multiply(V, term_2_Q))
                     # Q_bus[i] += V[i] * V[j] * ( \
                     #             G[i, j] * sin(A[i] - A[j]) - B[i, j] * cos(A[i] - A[j]))
 
@@ -146,7 +155,9 @@ class Bus9:
                 # print(P_line[i], Q_line[j]
         # P0, P1 = self.line_matrix_converter(P_line, A.shape[0])
         # print(P0, P1, P_bus)
+
         tf.assign(batch_estimated_measurement, tf.concat((P_bus, Q_bus), axis=1))
+        # tf.assign(batch_estimated_measurement, tf.random_normal((1, 18)))
 
         # print(batch_estimated_measurement.shape)
 

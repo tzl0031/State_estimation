@@ -9,7 +9,6 @@ MAX_ITERATIONS = 10000
 INITIAL_CONST = 1e-3
 BINARY_SEARCH_STEPS = 20
 ABORT_EARLY = True
-epsilon = 1e-1
 e2 = 1e-3
 c1 = 0.5
 
@@ -33,25 +32,28 @@ class AttackL2:
 
         self.repeat = binary_search_steps >= 10
 
-            # shape of batch input
-        shape = (self.batch_size, self.model.input_size)
-            # variable to optimize over
-        delta = tf.Variable(np.zeros(shape, dtype=np.float32))
+        # shape of batch input
+        meas_shape = (self.batch_size, self.model.input_size)
+        # variable to optimize over
+        delta = tf.Variable(np.ones(meas_shape, dtype=np.float32))
 
         # shape of input, output and c
-        self.tmeasurement = tf.Variable(np.zeros(shape), dtype=tf.float32)
-        self.tstate = tf.Variable(np.zeros((self.batch_size, self.model.output_size)), dtype=tf.float32)
-        self.const = tf.Variable(np.zeros(self.batch_size), dtype=tf.float32)
+        self.tmeasurement = tf.Variable(np.ones(meas_shape), dtype=tf.float32)
+        self.tstate = tf.Variable(np.ones((self.batch_size, self.model.output_size)), dtype=tf.float32)
+        self.const = tf.Variable(np.ones(self.batch_size), dtype=tf.float32)
 
         # placeholder
-        self.assign_tmeasurement = tf.placeholder(tf.float32, shape)
+        self.assign_tmeasurement = tf.placeholder(tf.float32, meas_shape)
         self.assign_tstate = tf.placeholder(tf.float32, (self.batch_size, self.model.output_size))
         self.assign_const = tf.placeholder(tf.float32, [self.batch_size])
 
+        self.boxmul = 1
+        self.boxplus = 0
         # new measurement
         # z_tilde
 
-        self.new_measurement = self.tmeasurement + delta
+        # self.new_measurement = self.tmeasurement + delta
+        self.new_measurement = tf.tanh(delta + self.tmeasurement) * self.boxmul + self.boxplus
 
         # compute the estimated state
         # x_hat
@@ -60,25 +62,23 @@ class AttackL2:
         self.new_estimated_state = self.model.predict(tf.reshape(self.new_measurement, (-1, self.model.input_size)))
         # l1 and l2 distance of state diff
         # (x_tilde_hat - x_hat)
-        self.l2dist = tf.reduce_sum(tf.square(self.new_estimated_state - self.estimated_state), 1)
+        # loss1 distance of states
+        self.loss1_ = tf.reduce_sum(tf.square(self.new_estimated_state - self.estimated_state), 1)
+
         # (tf.tanh(self.estimated_state) * self.boxmul + self.boxplus)))
 
-        self.estimated_new_measurement = self.bus.estimated(self.new_estimated_state)
+        self.estimated_new_measurement = self.bus.estimated(self.new_estimated_state, batch_size)
         # loss function
-        # loss1 distance of states
-        self.loss1_ = tf.reduce_sum(self.l2dist)
         # loss2 distance of measurements
-        # self.estimated_measurement = bus.estimated(self.state)
         # epsilon - (z_tilda_hat - z_tilda)
-        loss2 = tf.reduce_sum(tf.square(self.estimated_new_measurement - self.new_measurement))
-        # loss2_ = tf.reduce_sum(tf.square(self.new_measurement - tf.tanh(self.estimated_new_measurement) * self.boxmul + self.boxplus))
+        self.loss2_ = tf.reduce_sum(tf.square(self.estimated_new_measurement - self.new_measurement), 1)
+        self.loss2_ = tf.reduce_sum(tf.square(self.new_measurement - tf.tanh(self.estimated_new_measurement) * self.boxmul + self.boxplus), 1)
         # self.loss1 = tf.reduce_sum(self.const * loss1)
 
         # with a given c
-        self.loss2_ = tf.reduce_sum(self.initial_const * loss2)
         # loss = loss1 + loss2
         # self.loss = self.loss1 - self.loss2
-        self.loss = 1. / self.loss1_ + self.loss2_
+        self.loss = 1. / self.loss1_ + tf.reduce_sum(self.initial_const * self.loss2_)
 
 
         start_vars = set(x.name for x in tf.global_variables())
@@ -91,7 +91,7 @@ class AttackL2:
         self.setup = []
         self.setup.append(self.tmeasurement.assign(self.assign_tmeasurement))
         self.setup.append(self.tstate.assign(self.assign_tstate))
-        self.setup.append(self.const.assign(self.assign_const))
+        # self.setup.append(self.const.assign(self.assign_const))
 
         self.init = tf.variables_initializer(var_list=[delta]+new_vars)
 
@@ -107,9 +107,6 @@ class AttackL2:
     def attack(self, measurement, state):
         """
         Perform the L_2 attack on the given images for the given targets.
-
-        If self.targeted is true, then the targets represents the target labels.
-        If self.targeted is false, then targets are the original class labels.
         """
         r = []
         print('go up to', len(measurement))
@@ -131,7 +128,6 @@ class AttackL2:
         batch_size = self.batch_size
         # find the best c
         lower_bound = np.zeros(batch_size)
-        CONST = np.ones(batch_size) * self.initial_const
         upper_bound = np.ones(batch_size)*1e10
 
         o_bestl1 = [-1e10]*batch_size
@@ -150,26 +146,25 @@ class AttackL2:
 
 
         self.sess.run(self.setup, {self.assign_tmeasurement: batch_measurement,
-                                   self.assign_tstate: batch_state,
-                                   self.assign_const: CONST})
+                                   self.assign_tstate: batch_state})
         for iteration in range(self.MAX_ITERATIONS):
             # perform attack
             # l: total loss, l1s: state dist, l2s: measurement dist
-            _, l, l1s, l2s, new_measurement = self.sess.run(
-                [self.train, self.loss, self.loss1_, self.loss2_, self.new_measurement])
+            _, l, l1s, new_measurement = self.sess.run(
+                [self.train, self.loss, self.loss1_, self.new_measurement])
 
             # # print total loss, state dist, measurement dist
             if iteration == 0:
                 print('num of iteration', "total loss", "mea_dist", "state_dist")
             if iteration % (self.MAX_ITERATIONS // 10) == 0:
-                print('#', iteration, self.sess.run([self.loss, self.loss1_, self.loss2_]))
+                print('#', iteration, self.sess.run([self.loss, self.loss2_, self.loss1_]))
             #
             # # if self.ABORT_EARLY and iteration % (self.MAX_ITERATIONS // 10) == 0:
             # #     if l > prev * .09999:
             # #         break
             # # prev = l
             #
-            for e, (l1s, l2s, new_measurement) in enumerate(zip(l1s, l2s, new_measurement)):
+            for e, (l1s, new_measurement) in enumerate(zip(l1s, new_measurement)):
                 if l1s > bestl1[e]:
                     bestl1[e] = l1s
                     o_bestattack[e] = new_measurement
@@ -243,7 +238,7 @@ class AttackL2:
             #             CONST[e] *= 10
 
         o_bestl1 = np.array(o_bestl1)
-        print(CONST)
+        print(self.initial_const)
         # print(o_bestattack)
 
         return o_bestattack

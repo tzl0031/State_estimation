@@ -1,0 +1,12 @@
+	error level	distance metric		
+	0.1	L2		
+	min	max	average	success rate
+change of voltage angle (deg)	0.24	31.49	8.76	53%
+injection to power	0.01	1.32	0.38	
+				
+				
+	error level	distance metric		
+	0.1	L2		
+	min	max	average	success rate
+change of voltage angle (deg)	0.15	49.6	8.09	58%
+injection to power	0.015	2.04	0.36	

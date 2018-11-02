@@ -15,8 +15,6 @@ def perturb_meas(xs, meas):
     if xs.ndim < 2:
         xs = np.array([xs])
 
-
-
     tile = [len(xs)] + [1]
     meass = np.tile(meas, tile)
 
@@ -37,6 +35,9 @@ def perturb_meas(xs, meas):
             # print(meas[int(pos)])
             # print(value)
             meas[int(pos)] += value
+            np.clip(meas, -1, 1)
+        # print(x)
+        # print(meas)
 
     return meass
 

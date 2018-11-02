@@ -52,7 +52,14 @@ def train9(data, bus, file_name, params, num_epoch=100, batch_size=64, init=None
     hidden1 = Dense(params[0], input_dim=data.train_data.shape[1], activation='relu')(input)
     hidden2 = Dense(params[1], activation='relu')(hidden1)
 
-    # output layer
+    # model = Sequential()
+    # model.add(Dense(params[0], input_dim=data.train_data.shape[1]))
+    # model.add(Activation('relu'))
+    # model.add(Dense(params[1]))
+    # model.add(Activation('relu'))
+    # model.add(Dense(data.train_label.shape[1]))
+
+    # # output layer
     output = Dense(data.train_label.shape[1])(hidden2)
 
     model = Model(input, output)
@@ -62,17 +69,25 @@ def train9(data, bus, file_name, params, num_epoch=100, batch_size=64, init=None
 
     adam = Adam(lr=0.001)
 
-    def tian_loss_wrapper(input, batch_size):
+    def tian_loss_wrapper(input):
         def tian_loss(y_true, y_pred):
-
-            x_pred = bus.estimated(y_pred, batch_size)
-            loss = K.mean(K.square(input - x_pred))
-            return loss
+            print(batch_size)
+            # x_pred = bus.estimated(y_pred, batch_size)
+            x_pred = tf.ones_like(input)
+            loss1 = x_pred - input
+            loss2 = K.square(loss1)
+            loss3 = K.mean(loss2, -1)
+            loss = K.mean(K.square(x_pred - input), axis=-1)
+            print(tf.is_nan(loss))
+            if loss is not None:
+                return loss
         return tian_loss
 
 
 
-    model.compile(loss=tian_loss_wrapper(input, batch_size), optimizer=adam)
+    model.compile(loss=tian_loss_wrapper(input), optimizer=adam)
+    # model.compile(loss='mse', optimizer=adam)
+
 
     history = model.fit(data.train_data, data.train_label,
               batch_size=batch_size,
@@ -95,7 +110,7 @@ bus = Bus9()
 
 # history_14 = train14(data, 'models/train_14', 80, num_epoch=100, batch_size=256)
 # history_30 = train30(data, 'models/train_30', 80, num_epoch=100, batch_size=256)
-history_9 = train9(data, bus, 'models/train_9', [6, 4], num_epoch=50, batch_size=1)
+history_9 = train9(data, bus, 'models/train_9', [2, 3], num_epoch=50, batch_size=1)
 with tf.Session() as sess:
     model = Model9('models/train_9', sess)
 
