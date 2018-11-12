@@ -13,23 +13,27 @@ import keras.backend as K
 # case 118, bus=118, line = 177, gen=9, synchronous_condenser=35, transformer=9, loads=91
 
 def load_data(test=1, case_num=9):
-    file_name = 'data/measurement_' + str(case_num)+ "bus_test.csv" if test else 'data/measurement_' + str(case_num)+"bus_train.csv"
+    file_name = 'data/measurement_' + str(case_num) + "bus_test.csv" if test else 'data/measurement_' + str(case_num)+"bus_train.csv"
     df = pd.read_csv(file_name, header=None)
-    noise = np.random.normal(0, 0.1, size=df.shape)
-    df = df + noise
+    # cols = [4, 5, 8, 10, 12, 21, 24, 26, 27, 34, 35, 38, 40, 54, 57]
+
+    # cols = [6, 7, 20]
+    # df.drop(columns=cols, axis=1, inplace=True)
+
     scaler = MinMaxScaler(feature_range=(-1, 1))
     meas = scaler.fit_transform(df)
+    # noise = np.random.normal(0, 0.01, size=meas.shape)
+
     # data transform
     # data = np.concatenate([p_bus, p0, p1])
     # drop generator vol and ref angle
-    # meas = np.clip(meas + noise, -1, 1)
+
     return meas
 
 
 def load_label(test=1, case_num=9):
     file_name = 'data/state_' + str(case_num) + "bus_test.csv" if test else 'data/state_'+ str(case_num)+"bus_train.csv"
     df = pd.read_csv(file_name, header=None)
-    # cols = [0, 1, 2, 9]
     # df.drop(df.columns[:10], axis=1, inplace=True)
     scaler = MinMaxScaler(feature_range=(-1, 1))
     state = scaler.fit_transform(df)
@@ -59,9 +63,9 @@ class Model9:
         self.output_size = 18
 
         model = Sequential()
-        model.add(Dense(12, input_dim=self.input_size))
+        model.add(Dense(16, input_dim=self.input_size))
         model.add(Activation('sigmoid'))
-        model.add(Dense(24))
+        model.add(Dense(40))
         model.add(Activation('sigmoid'))
         model.add(Dense(self.output_size))
         model.load_weights(restore)
@@ -74,11 +78,13 @@ class Model9:
 
 class Model14:
     def __init__(self, restore, session=None):
-        self.input_size = 48
+        self.input_size = 25
         self.output_size = 28
 
         model = Sequential()
-        model.add(Dense(80, input_dim=self.input_size))
+        model.add(Dense(64, input_dim=self.input_size))
+        model.add(Activation('sigmoid'))
+        model.add(Dense(128))
         model.add(Activation('sigmoid'))
         model.add(Dense(self.output_size))
         model.load_weights(restore)
@@ -91,11 +97,13 @@ class Model14:
 
 class Model30:
     def __init__(self, restore, session=None):
-        self.input_size = 112
+        self.input_size = 45
         self.output_size = 60
 
         model = Sequential()
-        model.add(Dense(80, input_dim=self.input_size))
+        model.add(Dense(64, input_dim=self.input_size))
+        model.add(Activation('sigmoid'))
+        model.add(Dense(128))
         model.add(Activation('sigmoid'))
         model.add(Dense(self.output_size))
         model.load_weights(restore)

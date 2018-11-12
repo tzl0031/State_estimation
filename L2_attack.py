@@ -4,16 +4,15 @@ import numpy as np
 import itertools
 
 
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 1e-2
 MAX_ITERATIONS = 10000
-INITIAL_CONST = 1e-3
 BINARY_SEARCH_STEPS = 20
 ABORT_EARLY = True
-e2 = 1e-3
+e2 = 1e-2
 c1 = 0.5
 
 class AttackL2:
-    def __init__(self, sess, model, bus, initial_const, batch_size=1, learning_rate=LEARNING_RATE, binary_search_steps=BINARY_SEARCH_STEPS, max_iterations=MAX_ITERATIONS, abort_early=ABORT_EARLY):
+    def __init__(self, sess, model, bus, initial_const1, initial_const2, batch_size=1, learning_rate=LEARNING_RATE, binary_search_steps=BINARY_SEARCH_STEPS, max_iterations=MAX_ITERATIONS, abort_early=ABORT_EARLY):
         """
 
         :type batch_size: int
@@ -25,7 +24,9 @@ class AttackL2:
         self.BINARY_SEARCH_STEPS = binary_search_steps
         self.MAX_ITERATIONS = max_iterations
         self.ABORT_EARLY = abort_early
-        self.initial_const = initial_const
+        self.initial_const1 = initial_const1
+        self.initial_const2 = initial_const2
+
         self.batch_size = batch_size
         self.model = model
         self.bus = bus
@@ -60,26 +61,29 @@ class AttackL2:
         self.estimated_state = self.model.predict(tf.reshape(self.tmeasurement, (-1, self.model.input_size)))
         # x_tilde_hat
         self.new_estimated_state = self.model.predict(tf.reshape(self.new_measurement, (-1, self.model.input_size)))
+
+
         # l1 and l2 distance of state diff
         # (x_tilde_hat - x_hat)
         # loss1 distance of states
-        self.loss1_ = tf.reduce_sum(tf.square(self.new_estimated_state - self.estimated_state), 1)
+        self.loss1_ = tf.reduce_mean(tf.abs(self.new_estimated_state - self.estimated_state), 1)
 
         # (tf.tanh(self.estimated_state) * self.boxmul + self.boxplus)))
 
         self.estimated_new_measurement = self.bus.estimated(self.new_estimated_state, batch_size)
+
         # loss function
         # loss2 distance of measurements
         # epsilon - (z_tilda_hat - z_tilda)
         self.loss2_ = tf.reduce_sum(tf.square(self.estimated_new_measurement - self.new_measurement), 1)
-        self.loss2_ = tf.reduce_sum(tf.square(self.new_measurement - tf.tanh(self.estimated_new_measurement) * self.boxmul + self.boxplus), 1)
+        self.loss2_ = tf.sqrt(tf.reduce_sum(tf.square(self.new_measurement - tf.tanh(self.estimated_new_measurement) * self.boxmul + self.boxplus), 1))
+        self.loss3 = tf.sqrt(tf.reduce_sum(tf.square(delta), 1))
         # self.loss1 = tf.reduce_sum(self.const * loss1)
 
         # with a given c
         # loss = loss1 + loss2
         # self.loss = self.loss1 - self.loss2
-        self.loss = 1. / self.loss1_ + tf.reduce_sum(self.initial_const * self.loss2_)
-
+        self.loss = -(self.loss1_ + self.initial_const1/self.loss2_ + self.initial_const2/self.loss3)
 
         start_vars = set(x.name for x in tf.global_variables())
         optimizer = tf.train.AdamOptimizer(self.LEARNING_RATE)
@@ -100,7 +104,6 @@ class AttackL2:
 # measurement corresponding to new_estimated states
         # z_tilde_hat
         # convert to np and calculated measurement
-
         # set up adam optimizer
 
 
@@ -126,12 +129,14 @@ class AttackL2:
         """
 
         batch_size = self.batch_size
+        measurement = np.arctanh((measurement) * 0.999999)
         # find the best c
         lower_bound = np.zeros(batch_size)
+        # CONST = np.ones(batch_size) * self.initial_const
         upper_bound = np.ones(batch_size)*1e10
 
-        o_bestl1 = [-1e10]*batch_size
-        o_bestl2 = [-1e10]*batch_size
+        o_bestl1 = [-1]*batch_size
+        o_bestl2 = [-1]*batch_size
         o_bestattack = [np.zeros(measurement[0].shape)]*batch_size
 
 
@@ -141,7 +146,8 @@ class AttackL2:
         batch_measurement = measurement[:batch_size]
         batch_state = state[:batch_size]
         bestl1 = [-1e10] * batch_size
-        bestl2 = [-1e10] * batch_size
+        bestl2 = [10] * batch_size
+        bestl3 = [10] * batch_size
 
 
 
@@ -150,24 +156,26 @@ class AttackL2:
         for iteration in range(self.MAX_ITERATIONS):
             # perform attack
             # l: total loss, l1s: state dist, l2s: measurement dist
-            _, l, l1s, new_measurement = self.sess.run(
-                [self.train, self.loss, self.loss1_, self.new_measurement])
+            _, l, l1s, l2s, l3s, new_measurement = self.sess.run(
+                [self.train, self.loss, self.loss1_, self.loss2_, self.loss3, self.new_measurement])
 
             # # print total loss, state dist, measurement dist
             if iteration == 0:
-                print('num of iteration', "total loss", "mea_dist", "state_dist")
-            if iteration % (self.MAX_ITERATIONS // 10) == 0:
-                print('#', iteration, self.sess.run([self.loss, self.loss2_, self.loss1_]))
+                print('num of iteration', "total_loss", "mea_dist", "state_dist", "injection")
+            if iteration ==900:
+                print('#', iteration, self.sess.run((self.loss, self.loss2_, self.loss1_, self.loss3)))
             #
             # # if self.ABORT_EARLY and iteration % (self.MAX_ITERATIONS // 10) == 0:
             # #     if l > prev * .09999:
             # #         break
             # # prev = l
             #
-            for e, (l1s, new_measurement) in enumerate(zip(l1s, new_measurement)):
-                if l1s > bestl1[e]:
-                    bestl1[e] = l1s
-                    o_bestattack[e] = new_measurement
+            for e, (l1, l2, ii) in enumerate(zip(l1s, l2s, new_measurement)):
+                if l1 > bestl1[e] and l2 < bestl2[e] :
+                    bestl1[e] = l1
+                    bestl2[e] = l2
+
+                    o_bestattack[e] = ii
 
 
         # for outer_step in range(self.BINARY_SEARCH_STEPS):
@@ -237,8 +245,8 @@ class AttackL2:
             #         else:
             #             CONST[e] *= 10
 
-        o_bestl1 = np.array(o_bestl1)
-        print(self.initial_const)
+        # o_bestl1 = np.array(o_bestl1)
+        print("c1, c2:", self.initial_const1, self.initial_const2)
         # print(o_bestattack)
 
         return o_bestattack
